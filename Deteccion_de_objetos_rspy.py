@@ -2,7 +2,6 @@ import os
 import cv2
 import sys
 import numpy as np
-import matplotlib.pyplot as plt
 import time 
 
 import tkinter as tk
@@ -38,14 +37,13 @@ def cargar_imagen(x,y,carpeta_base, k):
         print(f"Imagen >{k}< no encontrada")
         sys.exit(1)
     
-    # Redimensionar imágenes
-    # Originalmente estaba como 640x480
+    # -Redimensionar imágenes
     img_color = cv2.resize(img_color, (x, y))
     img_depth = cv2.resize(img_depth, (x, y))
 
     return img_color,img_depth
 
-# Funcion para ajustar la resolucion de las imagenes 
+# -Funcion para ajustar la resolucion de las imagenes 
 def resolucion_imagen(ANCHO_X,ALTO_Y):
     # -Calculo de matrices 3x3
     x_s = ANCHO_X//3
@@ -61,28 +59,31 @@ def resolucion_imagen(ANCHO_X,ALTO_Y):
         (y_s*2, y_s*3, x_s, x_s*2),   # Matriz 8
         (y_s*2, y_s*3, x_s*2, x_s*3)    # Matriz 9
         ]    
-    return segmentacion_coords,y_s,x_s
-
+    return segmentacion_coords
 
 def main():
 
     fps = 30
     umbral = 15000
+    umbral_prox = 40000
     frames_cache = np.zeros((fps, 3, 3), dtype=np.float32)
     temp_inicial = time.time()
     # -Seleccion de carpeta
     n_imagenes, carpeta_base = seleccionar_carpeta()
 
     # -Resolucion recomendada en raspberry 320x240
+    # -Originalmente estaba como 640x480
     ANCHO_X, ALTO_Y = 320, 240
-    segmentacion_coords,y_s,x_s = resolucion_imagen(ANCHO_X,ALTO_Y)    
+    segmentacion_coords = resolucion_imagen(ANCHO_X,ALTO_Y)    
 
     for k in range(n_imagenes):
         # -Cargar imágenes
         img_color, img_depth = cargar_imagen(ANCHO_X,ALTO_Y,carpeta_base,k)
+        # -Aplicando efecto blur a la imagen de profundidad 
+        img_depth = cv2.GaussianBlur(img_depth,(7,7),0)
 
-        # -Inversión de la imagen de profundidad
-        img_inv = 65535 - img_depth
+        # -Inversion de la imagen de profundidad        
+        img_inv = 65535 - img_depth 
 
         # -Selección del umbral
         # -Selecciona los valores que pasan el umbral
@@ -103,15 +104,24 @@ def main():
 
         # -Detección del objeto mediante el umbral 
         PU = promedios_corregidos >= umbral
-        
+        PUP = promedios_corregidos >= umbral_prox
+
         # -Dibuja los rectángulos en la imagen
         for row in range(PU.shape[0]):
             for col in range(PU.shape[1]):
+                y1, y2, x1, x2 = segmentacion_coords[row * 3 + col]
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                # -Calcula la distancia de los objetos 
+                distancia = img_depth[cy, cx] / 1000
+                distancia = f"{distancia:.2f} m"
                 if PU[row, col] == 1: 
-                    x1, y1 = col * x_s, row * y_s
-                    x2, y2 = x1 + x_s, y1 + y_s
                     cv2.rectangle(img_color, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
+                if PUP[row, col] == 1: 
+                    cv2.rectangle(img_color, (x1, y1), (x2, y2), (0, 0, 255), 2)                    
+                
+                cv2.putText(img_color,distancia, (x1, y1 + 15 ), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                    # Mostrar la distancia en metros dentro del cuadro                
+                    
         # -Muestra la imagen
         cv2.imshow('Deteccion de Objetos', img_color)
         cv2.waitKey(1)
@@ -119,7 +129,7 @@ def main():
     cv2.destroyAllWindows()
     temp_final = time.time()
     print(f"(seg): {temp_final - temp_inicial:.2f} segundos")
-
+    
     return 0
 
 if __name__ == '__main__':
